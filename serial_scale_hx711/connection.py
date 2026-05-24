@@ -41,8 +41,7 @@ class SerialConnection:
 
     def __str__(self) -> str:
         return (
-            f"SerialConnection: {self.serial_port} @ {self.baudrate} baud, "
-            f"timeout={self.timeout}"
+            f"SerialConnection: {self.serial_port} @ {self.baudrate} baud, timeout={self.timeout}"
         )
 
     def __del__(self) -> None:
@@ -58,6 +57,8 @@ class SerialConnection:
                 port=self.serial_port,
                 baudrate=self.baudrate,
                 timeout=self.timeout,
+                dsrdtr=False,  # prevent DTR toggle from resetting the Arduino on open
+                rtscts=False,
             )
             # is open?
             if self.connection.is_open:

@@ -1,5 +1,5 @@
 /*
-  Firmware version: "2.0.4"
+  Firmware version: "2.1.0"
   -------------------------------------------------------------------------------------
   Adapted example from HX711 library for `serial-weighing-scale`. Lars Rollik, nov2021.
   github.com/larsrollik/serial-weighing-scale
@@ -8,6 +8,15 @@
   Arduino library for HX711 24-Bit Analog-to-Digital Converter for Weight Scales
   Olav Kallhovd sept2017
   -------------------------------------------------------------------------------------
+  Startup behaviour:
+    - HX711 init begins immediately when Arduino powers on (non-blocking).
+    - setup() returns in microseconds; the Timer1 ISR drives LoadCell.update().
+    - Init completes within ~500 ms; the scale then processes commands normally.
+    - Commands received before init is done are silently discarded (serial buffer
+      is cleared on first command check after init).
+    - Python must NOT toggle DTR on port open (dsrdtr=False in pyserial) to avoid
+      resetting the Arduino on connect.  If a reset does occur the init re-runs and
+      completes in <500 ms — Python polls <i> until it gets a valid identity response.
 */
 
 #include <HX711_ADC.h>
@@ -16,12 +25,12 @@
 #define CMD Serial
 #define HX711_DOUT 2      // DATA
 #define HX711_SCK 3       // CLOCK
-#define SAMPLES_IN_USE 1  // number of samples to average for measurement, less will cause more noise but faster response
-// #define CALIBRATION_FACTOR -3150  // CHANGE THIS VALUE FROM CALIBRATION RESULT  // scale 1
-#define CALIBRATION_FACTOR -2630  // CHANGE THIS VALUE FROM CALIBRATION RESULT  // scale 2
+#define SAMPLES_IN_USE 1  // 1 = fastest; increase for less noise (slower)
+// #define CALIBRATION_FACTOR -3150  // scale 1
+#define CALIBRATION_FACTOR -2630  // scale 2
 #define SCALING_FACTOR 1.0
-#define STABILIZING_TIME 2000  // precision right after power-up can be improved by adding a few seconds of stabilizing time
-#define PERFORM_TARE true      // set to false if you don't want tare to be performed in the next step
+#define STABILIZING_TIME 500  // ms — enough for HX711 to settle after power-on
+#define PERFORM_TARE true
 #define DEBUG_PRINT false
 #define ID_STRING "<SerialWeighingScale>"
 #define BUFFER_SIZE 10
@@ -32,162 +41,132 @@ HX711_ADC LoadCell(HX711_DOUT, HX711_SCK);
 float buffer[BUFFER_SIZE];
 uint8_t bufIndex = 0;
 bool bufFilled = false;
-// Sampling flag set by ISR
+
+// Set true by Timer1 ISR every 100 ms
 volatile bool sampleFlag = false;
 
+// Set true once HX711 tare completes; commands are gated on this flag
+bool initDone = false;
+
+
 void setup() {
-  // establish communication
   CMD.begin(115200);
 
-  // initialize the scale
   LoadCell.begin();
-  LoadCell.start(STABILIZING_TIME, PERFORM_TARE);
   LoadCell.setSamplesInUse(SAMPLES_IN_USE);
   LoadCell.setGain(128);
 
-  if (LoadCell.getTareTimeoutFlag()) {
-    logMessage("Timeout, check MCU>HX711 wiring and pin designations");
-    while (1)
-      ;
-  } else {
-    LoadCell.setCalFactor(CALIBRATION_FACTOR);
-  }
+  for (int i = 0; i < BUFFER_SIZE; i++) buffer[i] = 0;
 
-  while (!CMD)
-    ;
-
-  identifyMyself();
-
-  if (DEBUG_PRINT)
-    logMessage("ready");
-
-  // Initialize buffer
-  for (int i = 0; i < BUFFER_SIZE; i++) {
-    buffer[i] = 0;
-  }
-
-  // --- Timer1 Setup for 100ms interrupts ---
-  noInterrupts();  // Disable interrupts during setup
-
-  TCCR1A = 0;  // Clear Timer/Counter Control Registers
+  // Timer1: fires every 100 ms (10 Hz), drives LoadCell.update() in loop()
+  noInterrupts();
+  TCCR1A = 0;
   TCCR1B = 0;
-  TCNT1 = 0;  // Clear timer counter
+  TCNT1  = 0;
+  OCR1A  = 24999;                              // 16 MHz / (64 * 10 Hz) - 1
+  TCCR1B |= (1 << WGM12);                     // CTC mode
+  TCCR1B |= (1 << CS11) | (1 << CS10);        // prescaler 64
+  TIMSK1 |= (1 << OCIE1A);                    // enable compare interrupt
+  interrupts();
 
-  // Set compare match register for 100ms interval
-  // Formula: OCR1A = (16*10^6) / (prescaler * frequency) - 1
-  // For 10Hz (100ms): OCR1A = 16,000,000 / (64 * 10) - 1 = 24,999
-  OCR1A = 24999;
-  TCCR1B |= (1 << WGM12);               // CTC mode
-  TCCR1B |= (1 << CS11) | (1 << CS10);  // Prescaler 64
-  TIMSK1 |= (1 << OCIE1A);              // Enable Timer1 compare interrupt
-
-  interrupts();  // Enable global interrupts
-
+  // Stabilise then kick off async tare; loop() polls getTareStatus() via Timer1 ISR
+  delay(STABILIZING_TIME);
+  LoadCell.tareNoDelay();
 }  // setup
 
 
 void loop() {
+  // --- Phase 1: wait for HX711 init to complete ---
+  if (!initDone) {
+    if (sampleFlag) {
+      sampleFlag = false;
+      LoadCell.update();
+    }
+    if (LoadCell.getTareStatus()) {
+      if (LoadCell.getTareTimeoutFlag()) {
+        logMessage("Timeout — check MCU>HX711 wiring and pin designations");
+        while (1);
+      }
+      LoadCell.setCalFactor(CALIBRATION_FACTOR);
+      initDone = true;
+      // Discard anything Python may have sent during init
+      while (CMD.available()) CMD.read();
+      if (DEBUG_PRINT) logMessage("ready");
+    }
+    return;
+  }
+
+  // --- Phase 2: normal operation ---
+
   if (sampleFlag) {
     sampleFlag = false;
-
     if (LoadCell.update()) {
       addToBuffer(LoadCell.getData());
     }
-  }//if
-
-  //   LoadCell.refreshDataSet();
-  // LoadCell.update();
-  //   float i = LoadCell.getData() / SCALING_FACTOR;
+  }
 
   static byte startByte = '<';
-  static byte stopByte = '>';
+  static byte stopByte  = '>';
   static byte commandChar;
-  // static uint16_t int1;
-  // static uint16_t int2;
 
   static bool receiving = false;
-  static byte buffer[256];
-  static int bufferIndex = 0;
+  static byte rxBuf[256];
+  static int  rxIdx = 0;
 
-  // Check if data is available
   while (CMD.available()) {
-    byte incomingByte = CMD.read();
+    byte b = CMD.read();
 
-    if (incomingByte == startByte) {
-      // Start receiving message
+    if (b == startByte) {
       receiving = true;
-      bufferIndex = 0;
+      rxIdx = 0;
       continue;
     }
 
-    // EVAL: Stop receiving message and process data
-    if (incomingByte == stopByte) {
+    if (b == stopByte) {
       receiving = false;
-      commandChar = buffer[0];
+      commandChar = rxBuf[0];
 
       switch (commandChar) {
         case 'i':
-          // identify as scale
           identifyMyself();
           break;
 
         case 'w':
-          // read weight
-
-          if (DEBUG_PRINT)
-            logMessage("reading weight");
-
-          // readWeight();
+          if (DEBUG_PRINT) logMessage("reading weight");
           CMD.println(String(getRollingAverage(2)));
           break;
 
         case 't':
-          // tare scale
           tare_scale();
           break;
 
         case 'c':
-          // calibrate scale (factor)
           calibrate();
           break;
 
         case 'f':
-          // read calibration factor
           CMD.println(String(CALIBRATION_FACTOR));
           break;
 
         default:
-          if (DEBUG_PRINT)
-            logMessage("Invalid command");
+          if (DEBUG_PRINT) logMessage("Invalid command");
           break;
       }
-    }  // EVAL
+    }
 
-    // RX
-    if (receiving) {
-      // Store received bytes in buffer
-      if (bufferIndex < sizeof(buffer)) {
-        buffer[bufferIndex++] = incomingByte;
-      }
-    }  // RX
-  }    // while
+    if (receiving && rxIdx < (int)sizeof(rxBuf)) {
+      rxBuf[rxIdx++] = b;
+    }
+  }
 }  // loop
 
 
-// Timer interrupt handler for sampling
-void sampleLoadCell() {
-  if (LoadCell.update()) {
-    float sample = LoadCell.getData();  // Read sample from HX711
-    addToBuffer(sample);
-  }
-}
-
-// Timer1 ISR every 100ms
+// Timer1 ISR — sets flag every 100 ms; actual update() call is in loop()
 ISR(TIMER1_COMPA_vect) {
   sampleFlag = true;
 }
 
-// Add the new sample to the buffer
+
 void addToBuffer(float val) {
   buffer[bufIndex++] = val;
   if (bufIndex >= BUFFER_SIZE) {
@@ -204,11 +183,9 @@ float getRollingAverage(int precision) {
   for (uint8_t i = 0; i < size; i++) sum += buffer[i];
   float avg = sum / size;
 
-  // Round to specified precision
   float factor = pow(10, precision);
   return round(avg * factor) / factor;
 }
-
 
 void identifyMyself() {
   CMD.println(ID_STRING);
@@ -217,74 +194,48 @@ void identifyMyself() {
 void logMessage(const String& msg) {
   CMD.print("LOG: ");
   CMD.println(msg);
-}  // end:log
-
+}
 
 void sendFloatAsBytes(float value) {
-  union {
-    float f;
-    byte b[4];
-  } data;
-
+  union { float f; byte b[4]; } data;
   data.f = value;
-
-  for (int i = 0; i < 4; i++) {
-    CMD.write(data.b[i]);
-  }
-}  // end:float
+  for (int i = 0; i < 4; i++) CMD.write(data.b[i]);
+}
 
 void readWeight() {
-  if (DEBUG_PRINT)
-    logMessage("fct: readWeight");
-
-  // LoadCell.refreshDataSet();
+  if (DEBUG_PRINT) logMessage("fct: readWeight");
   LoadCell.update();
   float i = LoadCell.getData() / SCALING_FACTOR;
-  // sendFloatAsBytes(i);
   CMD.println(String(i));
-}  // end: read weight
+}
 
 int tare_scale() {
-  // LoadCell.tareNoDelay();  // Start tare without delay
-  LoadCell.tare();  // Start tare (blocking)
-}  // end: tare
-
+  LoadCell.tare();
+}
 
 void calibrate() {
-  LoadCell.setCalFactor(1.0);  // Reset calibration factor to default
-  tare_scale();                // Tare the scale before calibration
+  LoadCell.setCalFactor(1.0);
+  tare_scale();
 
-  logMessage("Make sure to send 'c' calibrate command and known mass float each without line ending!");
-  logMessage("Please enter the known mass (in grams) and press Enter:");
-  while (!CMD.available()) {
-    // Wait for the user to submit the known mass
-    delay(100);
-  }
+  logMessage("Send known mass as float, then 'a' to confirm weight placed.");
+  while (!CMD.available()) delay(100);
 
-  // Read the known mass input from serial
   float known_mass = CMD.parseFloat();
-  logMessage("Known mass received: ");
-  logMessage(String(known_mass));  // Confirm receipt of known mass
-
-  logMessage("Now, please place the known weight on the scale and press 'a' to begin calibration.");
+  logMessage("Known mass: " + String(known_mass));
+  logMessage("Place weight on scale, send 'a' to calibrate.");
 
   boolean weight_added = false;
   while (!weight_added) {
     if (CMD.available()) {
-      char cmdChar = CMD.read();  // Read input from user
-      LoadCell.update();          // Update load cell reading
-
-      // Wait for user to confirm the weight is placed and press 'a'
+      char cmdChar = CMD.read();
+      LoadCell.update();
       if (cmdChar == 'a') {
-        LoadCell.refreshDataSet();  // Refresh data from the load cell
+        LoadCell.refreshDataSet();
         float new_calibration_factor = LoadCell.getNewCalibration(known_mass);
-
-        logMessage("New calibration factor: ");
-        logMessage(String(new_calibration_factor));
-
-        weight_added = true;  // Calibration is complete
+        logMessage("New calibration factor: " + String(new_calibration_factor));
+        weight_added = true;
       }
     }
-    delay(10);  // Short delay to avoid excessive CPU usage
-  }             // while
-}  // end: calibrate
+    delay(10);
+  }
+}

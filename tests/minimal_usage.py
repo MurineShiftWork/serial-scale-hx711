@@ -15,7 +15,7 @@ if __name__ == "__main__":
     logger.setLevel(logging.DEBUG)
 
     serial_param: ScaleConfig = {
-        "serial_port": "/dev/ttyACM1",
+        "serial_port": "/dev/ttyACM3",
         "baudrate": 115200,
         "timeout": 1,
     }
