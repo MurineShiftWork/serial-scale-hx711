@@ -109,7 +109,7 @@ class SerialConnection:
     ) -> None:
         """"""
         assert isinstance(command, str)
-        assert isinstance(data, (list, int, str, type(None)))
+        assert isinstance(data, list | int | str | type(None))
         assert isinstance(order, str)
 
         # fix data type

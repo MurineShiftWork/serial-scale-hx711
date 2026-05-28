@@ -17,8 +17,9 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/larsrollik/serial-scale-hx711"
-"Issue Tracker" = "https://github.com/larsrollik/serial-scale-hx711/issues"
+Homepage = "https://github.com/MurineShiftWork/serial-scale-hx711"
+Documentation = "https://larsrollik.github.io/serial-scale-hx711/"
+"Issue Tracker" = "https://github.com/MurineShiftWork/serial-scale-hx711/issues"
 
 [project.optional-dependencies]
 dev = [
@@ -27,6 +28,9 @@ dev = [
     "pytest-cov",
     "pre-commit",
 ]
+docs = [
+    "mkdocs-material",
+]
 
 # ---------------------------------------------------------------------------
 # Build
@@ -34,12 +38,24 @@ dev = [
 
 [tool.hatch.version]
 source = "vcs"
+fallback-version = "2.0.4"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/serial_scale_hx711/_version.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["serial_scale_hx711"]
+packages = ["src/serial_scale_hx711"]
 
 [tool.hatch.build.targets.sdist]
-include = ["/serial_scale_hx711", "/tests", "/README.md", "/LICENSE", "/pyproject.toml"]
+include = [
+    "/src/serial_scale_hx711",
+    "/tests",
+    "/README.md",
+    "/LICENSE",
+    "/pyproject.toml",
+    "/CITATION.cff",
+    "/VERSION",
+]
 
 # ---------------------------------------------------------------------------
 # Commitizen
@@ -47,10 +63,11 @@ include = ["/serial_scale_hx711", "/tests", "/README.md", "/LICENSE", "/pyprojec
 
 [tool.commitizen]
 name = "cz_conventional_commits"
-version_provider = "scm"
+version_provider = "commitizen"
+version = "2.0.4"
 tag_format = "v$version"
 update_changelog_on_bump = false
-tag_only = true
+version_files = ["VERSION"]
 
 # ---------------------------------------------------------------------------
 # Pytest
@@ -81,4 +98,9 @@ line-ending = "auto"
 # ---------------------------------------------------------------------------
 
 [tool.mypy]
+mypy_path = "src"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "toml"
 ignore_missing_imports = true
