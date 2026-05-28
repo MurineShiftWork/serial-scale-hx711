@@ -1,0 +1,1 @@
+{"config":{"lang":["en"],"separator":"[\\s\\-]+","pipeline":["stopWordFilter"],"fields":{"title":{"boost":1000.0},"text":{"boost":1.0},"tags":{"boost":1000000.0}}},"docs":[{"location":"","title":"serial-scale-hx711","text":"<p>Python driver for Arduino+HX711 serial weighing scales.</p> <p>See the README for installation and usage.</p>"}]}
