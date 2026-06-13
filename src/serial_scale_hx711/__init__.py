@@ -1,3 +1,9 @@
+"""Python driver for Arduino+HX711 serial weighing scales.
+
+The main entry point is :class:`Scale`. Use :func:`connect_serial_scale` to
+auto-detect the port when it is not known in advance.
+"""
+
 __author__ = "Lars B. Rollik"
 
 from importlib.metadata import PackageNotFoundError, version

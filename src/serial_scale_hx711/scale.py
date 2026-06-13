@@ -7,9 +7,23 @@ from serial_scale_hx711.connection import SerialConnection
 
 
 class Scale(SerialConnection):
+    """Arduino+HX711 serial weighing scale driver.
+
+    Sends single-character commands over serial and parses newline-terminated
+    float responses from the firmware. Always call ``start()`` before reading;
+    call ``disconnect()`` (or use as a context managed resource) when done.
+    """
+
     _identity_response = "<SerialWeighingScale>"
 
     def __init__(self, serial_port: str, baudrate: int = 115200, timeout: float = 1) -> None:
+        """Configure the scale for the given serial port.
+
+        Args:
+            serial_port: OS path to the device (e.g. ``/dev/ttyACM0``).
+            baudrate: Must match firmware; default 115200.
+            timeout: Serial read timeout in seconds.
+        """
         # init serial connection
         super().__init__(serial_port=serial_port, baudrate=baudrate, timeout=timeout)
 
@@ -17,7 +31,7 @@ class Scale(SerialConnection):
         """Connect and wait for the scale firmware to finish initialising.
 
         Firmware only responds to <i> (identify) once the HX711 tare is complete,
-        so polling identify() is sufficient — no need to hammer read_weight().
+        so polling identify() is sufficient; no need to hammer read_weight().
         """
         self.connect()
 
@@ -43,8 +57,11 @@ class Scale(SerialConnection):
         return self.identify()
 
     def read_weight(self) -> float | None:
-        """
-        Get the weight from the scale.
+        """Request a single weight reading from the firmware.
+
+        Returns:
+            Weight in grams rounded to two decimal places, or ``None`` if the
+            firmware response could not be parsed as a float.
         """
         self.send(command="w", order="c")
         weight_result = self.read_line()
@@ -58,8 +75,11 @@ class Scale(SerialConnection):
             return None
 
     def tare(self) -> None:
-        """
-        Tare the scale.
+        """Zero the scale and wait for the tare to propagate through the firmware buffer.
+
+        The firmware's ``LoadCell.tare()`` call is blocking (~100 ms). An
+        additional 400 ms sleep ensures the rolling-average buffer is flushed
+        before the next ``read_weight`` call.
         """
         self.send(command="t", order="c")
         # LoadCell.tare() on firmware is blocking (~100 ms at 10 Hz / 1 sample).
@@ -68,17 +88,21 @@ class Scale(SerialConnection):
         time.sleep(0.5)
 
     def identify(self) -> bool:
-        """
-        Identify the device connected to the serial port.
-        This method sends a command to the device and waits for a response.
+        """Send the identity command and return True if the firmware responds correctly.
+
+        The firmware replies with the string ``<SerialWeighingScale>`` once
+        initialisation is complete. Returns False for any other response.
         """
         self.send(command="i", order="c")
         response = self.read_line()
         return response == self._identity_response
 
     def get_calibration_factor(self) -> float | None:
-        """
-        Get the calibration factor from the scale.
+        """Read the calibration factor stored in the firmware.
+
+        Returns:
+            Calibration factor as a float, or ``None`` if the response could
+            not be parsed.
         """
         self.send(command="f", order="c")
 
@@ -108,7 +132,20 @@ class Scale(SerialConnection):
         inter_read_delay: float = 0.1,
         measure: Callable = statistics.median,
     ) -> float:
-        """Repeated reads with statistical measure. Raises if no valid readings."""
+        """Take ``n_readings`` and reduce them with a statistical function.
+
+        Args:
+            n_readings: Total number of reads to attempt.
+            inter_read_delay: Seconds to wait between reads.
+            measure: Callable that accepts a list of floats and returns a scalar
+                (default: ``statistics.median``).
+
+        Returns:
+            Result of applying ``measure`` to all valid readings.
+
+        Raises:
+            RuntimeError: If every read attempt returned ``None``.
+        """
         readings = self.read_weight_repeated(
             n_readings=n_readings, inter_read_delay=inter_read_delay
         )

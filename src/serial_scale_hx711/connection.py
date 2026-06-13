@@ -6,6 +6,13 @@ from serial import Serial
 
 
 class SerialConnection:
+    """Low-level pyserial wrapper used as the base class for Scale.
+
+    Handles opening/closing the port, encoding outgoing messages with
+    start/stop framing bytes, and reading raw bytes or newline-terminated
+    responses.
+    """
+
     serial_port: str = ""
     baudrate: int
     timeout: float
@@ -19,12 +26,20 @@ class SerialConnection:
         timeout: float = 1,
         **kwargs: Any,
     ) -> None:
+        """Configure connection parameters without opening the port.
+
+        Args:
+            serial_port: OS path to the serial device (e.g. ``/dev/ttyACM0``).
+            baudrate: Baud rate; must match firmware (default 115200).
+            timeout: Read timeout in seconds passed to pyserial.
+        """
         self.serial_port = serial_port
         self.baudrate = baudrate or 115200
         self.timeout = timeout or 0.1
         self.connection = None
 
     def dict(self) -> dict:
+        """Return connection parameters as a plain dict."""
         class_data = {
             "serial_port": self.serial_port,
             "baudrate": self.baudrate,
@@ -49,9 +64,15 @@ class SerialConnection:
 
     @property
     def connected(self) -> bool:
+        """True if the serial port has been opened."""
         return self._connected
 
     def connect(self) -> "SerialConnection":
+        """Open the serial port and clear the input buffer.
+
+        DTR/RTS toggling is disabled so the Arduino is not reset on connect.
+        Returns self to allow chaining.
+        """
         if not self.connected:
             self.connection = Serial(
                 port=self.serial_port,
@@ -73,6 +94,7 @@ class SerialConnection:
         return self
 
     def disconnect(self) -> None:
+        """Close the serial port if it is open."""
         if self.connection is not None:
             self.connection.close()
             self.connection = None
@@ -80,7 +102,7 @@ class SerialConnection:
             logging.info(f"Disconnected from {self.serial_port}.")
 
     def _encode(self, data: Any, order: str) -> bytes:
-        """Encode & pack as byte struct & flank by start/stop bytes."""
+        """Pack data into a struct and wrap with ``<``/``>`` framing bytes."""
         # check that data is list
         if not isinstance(data, list):
             data = [data]
@@ -98,6 +120,7 @@ class SerialConnection:
         return message
 
     def _clear_buffer(self):
+        """Discard all bytes currently waiting in the receive buffer."""
         self.connection.read(self.connection.in_waiting)
         return not self.connection.in_waiting
 
@@ -107,7 +130,13 @@ class SerialConnection:
         data: list | int | str | None = None,
         order: str = "",
     ) -> None:
-        """"""
+        """Encode and send a command, optionally with a data payload.
+
+        Args:
+            command: Single-character command string (e.g. ``"w"`` for weight).
+            data: Optional payload appended after the command byte.
+            order: ``struct`` format string used when packing ``data``.
+        """
         assert isinstance(command, str)
         assert isinstance(data, list | int | str | type(None))
         assert isinstance(order, str)
@@ -129,22 +158,17 @@ class SerialConnection:
             logging.debug(f"Sent data: {str(data_to_send)}")
 
     def read_bytes(self, n_bytes: int, unpack_order: str) -> tuple[Any, ...]:
-        """
-        Read n_bytes from the serial port and unpack them according to the
-        specified unpack_order.
-        The unpack_order should be a format string compatible with the
-        struct module.
+        """Read exactly ``n_bytes`` and unpack them with ``struct.unpack``.
 
-        Parameters
-        ----------
-        n_bytes : int
-        unpack_order : str
+        Args:
+            n_bytes: Number of bytes to read.
+            unpack_order: ``struct`` format string (e.g. ``">f"`` for a big-endian float).
 
-        Returns
-        -------
-        tuple
-            Unpacked data as a tuple of values.
+        Returns:
+            Tuple of unpacked values matching the format string.
 
+        Raises:
+            ValueError: If fewer than ``n_bytes`` are received before the timeout.
         """
         raw_data = self.connection.read(n_bytes)
 
@@ -159,9 +183,7 @@ class SerialConnection:
         return unpacked_bytes
 
     def read_line(self) -> str:
-        """
-        Read a line from the serial port and decode it to a string.
-        """
+        """Read one newline-terminated line and return it as a stripped string."""
         line = self.connection.readline().decode("utf-8").strip()
         logging.debug(f"Received line: {line}")
         return line
