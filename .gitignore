@@ -140,3 +140,5 @@ src/*/_version.py
 
 # Pyre type checker
 .pyre/
+site/
+uv.lock
