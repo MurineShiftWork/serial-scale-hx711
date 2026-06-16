@@ -1,5 +1,7 @@
 # serial-scale-hx711
 
+[![PyPI](https://img.shields.io/pypi/v/serial-scale-hx711.svg)](https://pypi.org/project/serial-scale-hx711)
+
 Python driver for Arduino+HX711 serial weighing scales.
 
 > **Renamed from `serial-weighing-scale`** (PyPI: `serial-weighing-scale` ≤ 2.0.4).
