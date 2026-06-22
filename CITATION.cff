@@ -4,7 +4,7 @@ type: software
 title: "serial-scale-hx711: Python driver for Arduino+HX711 serial weighing scales"
 version: "2.0.4"
 repository-code: https://github.com/MurineShiftWork/serial-scale-hx711
-license: GPL-3.0
+license: BSD-3-Clause
 authors:
   - family-names: Rollik
     given-names: Lars B.
