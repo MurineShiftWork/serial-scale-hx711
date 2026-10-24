@@ -18,7 +18,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/MurineShiftWork/serial-scale-hx711"
-Documentation = "https://larsrollik.github.io/serial-scale-hx711/"
+Documentation = "https://MurineShiftWork.github.io/serial-scale-hx711/"
 "Issue Tracker" = "https://github.com/MurineShiftWork/serial-scale-hx711/issues"
 
 [project.optional-dependencies]
