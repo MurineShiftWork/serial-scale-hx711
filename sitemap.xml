@@ -2,6 +2,22 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://MurineShiftWork.github.io/serial-scale-hx711/</loc>
-         <lastmod>2026-05-30</lastmod>
+         <lastmod>2026-10-24</lastmod>
+    </url>
+    <url>
+         <loc>https://MurineShiftWork.github.io/serial-scale-hx711/api/</loc>
+         <lastmod>2026-10-24</lastmod>
+    </url>
+    <url>
+         <loc>https://MurineShiftWork.github.io/serial-scale-hx711/getting_started/</loc>
+         <lastmod>2026-10-24</lastmod>
+    </url>
+    <url>
+         <loc>https://MurineShiftWork.github.io/serial-scale-hx711/hardware/</loc>
+         <lastmod>2026-10-24</lastmod>
+    </url>
+    <url>
+         <loc>https://MurineShiftWork.github.io/serial-scale-hx711/usage/</loc>
+         <lastmod>2026-10-24</lastmod>
     </url>
 </urlset>
